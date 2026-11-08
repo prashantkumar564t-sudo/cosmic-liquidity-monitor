@@ -1,0 +1,11 @@
+﻿venv/
+__pycache__/
+*.pyc
+data/raw/*.json
+data/analysis/*.csv
+logs/*.csv
+logs/*.log
+!data/raw/.gitkeep
+!data/analysis/.gitkeep
+!logs/.gitkeep
+.vscode/
