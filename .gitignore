@@ -1,11 +1,30 @@
-﻿venv/
+venv/
 __pycache__/
 *.pyc
 data/raw/*.json
+data/analysis/*.json
 data/analysis/*.csv
+data/analysis/*.duckdb*
+*.duckdb*
 logs/*.csv
 logs/*.log
 !data/raw/.gitkeep
 !data/analysis/.gitkeep
 !logs/.gitkeep
+exports/*.parquet
+!exports/.gitkeep
 .vscode/
+
+# Google Apps Script clasp credentials & config
+.clasprc.json
+.clasp.json
+
+# Local mobile sync dumps & exports
+mobile_sync/
+exports/*.parquet
+!exports/.gitkeep
+*.parquet
+*.sqlite*
+*.db
+.env*
+

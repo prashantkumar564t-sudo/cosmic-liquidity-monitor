@@ -46,5 +46,5 @@ class OrderBookEvaluator:
             "total_ask_lots": total_ask_lots,
             "bid_depth_usd": round(total_bid_usd, 2),
             "ask_depth_usd": round(total_ask_usd, 2),
-            "imbalance": round(imbalance, 4)
+            "imbalance": round(imbalance, 4),
         }

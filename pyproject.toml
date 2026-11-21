@@ -1,0 +1,27 @@
+[project]
+name = "cosmic-liquidity-monitor"
+version = "0.2.0"
+description = "High-frequency Level-2 orderbook telemetry and options liquidity monitor for Cosmic Trade"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "websockets>=12.0",
+    "msgpack>=1.0.7",
+    "playwright>=1.40.0",
+    "duckdb>=0.10.0",
+    "ruff>=0.4.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src", "monitor"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E402", "E501"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

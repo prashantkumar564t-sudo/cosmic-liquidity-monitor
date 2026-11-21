@@ -1,23 +1,28 @@
 import sys
 from pathlib import Path
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import asyncio
 import json
-import time
 import threading
+import time
+
 import msgpack
 import websockets
-from src.config import WS_URL, SYMBOL
+
+from src.config import SYMBOL, WS_URL
+
 
 class CosmicWSClient:
     def __init__(self, ws_url: str = WS_URL, symbol: str = SYMBOL):
         self.ws_url = ws_url
         self.symbol = symbol
         self.depth_symbol = f"{symbol}:depth"
-        
+
+        self.lock = threading.Lock()
         self.latest_bids = []
         self.latest_asks = []
         self.last_update_ts = 0.0
@@ -28,13 +33,13 @@ class CosmicWSClient:
         # Cosmic Trade headers (Origin is critical for DEX WebSockets)
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Origin": "https://cosmic.trade"
+            "Origin": "https://cosmic.trade",
         }
-        
+
         while self.running:
             try:
                 print(f"[*] Connecting to {self.ws_url}...")
-                
+
                 # Handling header argument across different websockets library versions
                 try:
                     ws_ctx = websockets.connect(self.ws_url, additional_headers=headers)
@@ -43,20 +48,20 @@ class CosmicWSClient:
 
                 async with ws_ctx as ws:
                     print("[+] WebSocket Connected successfully!")
-                    
+
                     # 1. Subscribe to depth
                     sub_depth = json.dumps({"action": "subscribe", "symbols": [self.depth_symbol]})
                     await ws.send(sub_depth)
                     print(f"[->] Sent: {sub_depth}")
-                    
+
                     # 2. Subscribe to base ticker as well
                     sub_ticker = json.dumps({"action": "subscribe", "symbols": [self.symbol]})
                     await ws.send(sub_ticker)
-                    
+
                     while self.running:
                         raw_data = await ws.recv()
                         self.last_update_ts = time.time()
-                        
+
                         # Decode MsgPack
                         if isinstance(raw_data, bytes):
                             payload = msgpack.unpackb(raw_data, raw=False)
@@ -64,13 +69,14 @@ class CosmicWSClient:
                             payload = json.loads(raw_data)
 
                         if isinstance(payload, dict):
-                            # Debug: first time payload structure dekhne ke liye
-                            keys = list(payload.keys())
-                            if "b" in payload:
-                                self.latest_bids = [[float(p), float(q)] for p, q in payload["b"]]
-                            if "a" in payload:
-                                self.latest_asks = [[float(p), float(q)] for p, q in payload["a"]]
-                                
+                            # Thread-safe update of book levels
+                            with self.lock:
+                                if "b" in payload:
+                                    self.latest_bids = [[float(p), float(q)] for p, q in payload["b"]]
+                                if "a" in payload:
+                                    self.latest_asks = [[float(p), float(q)] for p, q in payload["a"]]
+                                self.last_update_ts = time.time()
+
             except Exception as e:
                 print(f"[!] WebSocket Connection Error: {type(e).__name__} -> {e}")
                 await asyncio.sleep(2.0)
@@ -89,22 +95,26 @@ class CosmicWSClient:
         self.running = False
 
     def get_latest_orderbook(self):
-        return {
-            "success": len(self.latest_bids) > 0 or len(self.latest_asks) > 0,
-            "bids": self.latest_bids.copy(),
-            "asks": self.latest_asks.copy(),
-            "timestamp": self.last_update_ts
-        }
+        with self.lock:
+            # Require both sides to be populated before returning success
+            has_both = len(self.latest_bids) > 0 and len(self.latest_asks) > 0
+            return {
+                "success": has_both,
+                "bids": [item.copy() for item in self.latest_bids],
+                "asks": [item.copy() for item in self.latest_asks],
+                "timestamp": self.last_update_ts,
+            }
+
 
 if __name__ == "__main__":
     client = CosmicWSClient()
     client.start()
-    
+
     # 6 seconds sampling
     for i in range(6):
         time.sleep(1)
         data = client.get_latest_orderbook()
-        print(f"[{i+1}] Bids: {len(data['bids'])} | Asks: {len(data['asks'])}")
+        print(f"[{i + 1}] Bids: {len(data['bids'])} | Asks: {len(data['asks'])}")
         if data["success"] and data["bids"]:
             print(f"    Sample Bid: {data['bids'][0]}")
     client.stop()

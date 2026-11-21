@@ -1,12 +1,14 @@
 import time
+
 from playwright.sync_api import sync_playwright
 
 # अगर आप ब्राउज़र में किसी खास ट्रेडिंग पेज पर जाते हैं (जैसे cosmic.trade/trade), तो वह URL यहाँ डालें:
 TARGET_URL = "https://cosmic.trade"
 
+
 def run_sniffer():
     print(f"[*] Sniffing WebSocket frames from {TARGET_URL}...")
-    
+
     with sync_playwright() as p:
         # Browser open (विंडो दिखेगी ताकि आप देख सकें कि पेज लोड हो रहा है)
         browser = p.chromium.launch(headless=False)
@@ -43,6 +45,7 @@ def run_sniffer():
             print(f"[!] Notice: {e}")
         finally:
             browser.close()
+
 
 if __name__ == "__main__":
     run_sniffer()

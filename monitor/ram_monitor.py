@@ -3,8 +3,9 @@ monitor/ram_monitor.py
 Cross-Platform Process Memory Tracker (Windows + Termux/Linux Standard Library)
 """
 
-import sys
 import os
+import sys
+
 
 def get_process_memory_mb(pid=None) -> float:
     """Returns Working Set (Windows) or VmRSS (Linux/Termux) in MB."""
@@ -19,31 +20,27 @@ def get_process_memory_mb(pid=None) -> float:
 
             class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
                 _fields_ = [
-                    ('cb', wintypes.DWORD),
-                    ('PageFaultCount', wintypes.DWORD),
-                    ('PeakWorkingSetSize', ctypes.c_size_t),
-                    ('WorkingSetSize', ctypes.c_size_t),
-                    ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
-                    ('QuotaPagedPoolUsage', ctypes.c_size_t),
-                    ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
-                    ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
-                    ('PagefileUsage', ctypes.c_size_t),
-                    ('PeakPagefileUsage', ctypes.c_size_t),
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
                 ]
 
             PROCESS_QUERY_INFORMATION = 0x0400
             PROCESS_VM_READ = 0x0010
-            handle = ctypes.windll.kernel32.OpenProcess(
-                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid
-            )
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
             if not handle:
                 return 0.0
 
             counters = PROCESS_MEMORY_COUNTERS()
             counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
-            success = ctypes.windll.psapi.GetProcessMemoryInfo(
-                handle, ctypes.byref(counters), counters.cb
-            )
+            success = ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb)
             ctypes.windll.kernel32.CloseHandle(handle)
 
             if success:
@@ -66,12 +63,14 @@ def get_process_memory_mb(pid=None) -> float:
                         # Format: VmRSS:     35400 kB
                         parts = line.split()
                         return round(float(parts[1]) / 1024.0, 2)
-            
+
             # Fallback using resource module
             import resource
+
             return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0, 2)
         except Exception:
             return 0.0
+
 
 if __name__ == "__main__":
     print(f"Platform: {sys.platform} | Process PID: {os.getpid()} | Current RAM: {get_process_memory_mb()} MB")

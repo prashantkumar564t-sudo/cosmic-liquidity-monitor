@@ -3,6 +3,7 @@ from pathlib import Path
 
 METRICS_FILE = Path(__file__).resolve().parent / "data" / "analysis" / "cosmic_btc_metrics.csv"
 
+
 def generate_telemetry_report():
     if not METRICS_FILE.exists():
         print(f"[!] Error: {METRICS_FILE} not found. Run the monitor first.")
@@ -29,9 +30,10 @@ def generate_telemetry_report():
     price_max = max(mid_prices)
     price_drift = round(price_max - price_min, 2)
     avg_spread = round(sum(spreads) / total_snapshots, 2)
+    avg_slip_10k = round(sum(slip_10k) / total_snapshots, 6)
     avg_slip_50k = round(sum(slip_50k) / total_snapshots, 6)
     max_slip_50k = round(max(slip_50k), 6)
-    
+
     ram_min = min(rams) if rams else 0.0
     ram_max = max(rams) if rams else 0.0
     ram_avg = round(sum(rams) / len(rams), 2) if rams else 0.0
@@ -44,8 +46,11 @@ def generate_telemetry_report():
     print("-" * 65)
     print(f"Mid Price Range          : ${price_min} -> ${price_max} (Drift: ${price_drift})")
     print(f"Average Spread           : ${avg_spread}")
-    print(f"Average Top-3 Depth      : Bids: {round(sum(top3_bids)/total_snapshots, 1)} Lots | Asks: {round(sum(top3_asks)/total_snapshots, 1)} Lots")
+    print(
+        f"Average Top-3 Depth      : Bids: {round(sum(top3_bids) / total_snapshots, 1)} Lots | Asks: {round(sum(top3_asks) / total_snapshots, 1)} Lots"
+    )
     print(f"Order Flow Imbalance     : Min: {min(imbalances):+.4f} | Max: {max(imbalances):+.4f}")
+    print(f"10k Slippage (Ladder)    : Avg: {avg_slip_10k}%")
     print(f"50k Slippage (Ladder)    : Avg: {avg_slip_50k}% | Worst-case: {max_slip_50k}%")
     print("-" * 65)
     print(f"PROCESS RAM FOOTPRINT    : Min: {ram_min} MB | Max: {ram_max} MB | Avg: {ram_avg} MB")
@@ -54,6 +59,7 @@ def generate_telemetry_report():
     else:
         print("Memory Stability Status  : [WARNING] Memory creeping up, check snapshot buffer")
     print("=" * 65 + "\n")
+
 
 if __name__ == "__main__":
     generate_telemetry_report()

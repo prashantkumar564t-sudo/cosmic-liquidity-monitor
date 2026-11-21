@@ -1,5 +1,6 @@
 from src.config import TAKER_FEE_RATE
 
+
 class ExecutionSimulator:
     @staticmethod
     def simulate_market_buy(asks: list, budget_usd: float) -> dict:
@@ -42,5 +43,5 @@ class ExecutionSimulator:
             "slippage_usd": round(nominal_slippage, 4),
             "slippage_pct": round(slippage_pct, 6),
             "taker_fee": round(taker_fee, 4),
-            "fully_filled": remaining_budget == 0
+            "fully_filled": remaining_budget == 0,
         }

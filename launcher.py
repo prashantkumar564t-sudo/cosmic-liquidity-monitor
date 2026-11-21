@@ -1,4 +1,5 @@
 import sys
+
 from src.main import run_monitor
 
 if __name__ == "__main__":

@@ -1,0 +1,86 @@
+name: Cosmic Evening Option Chain Collector
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: "Collection duration in minutes"
+        required: false
+        default: "300"
+      underlying:
+        description: "Underlying crypto assets"
+        required: false
+        default: "BTC,ETH"
+
+jobs:
+  collect-cosmic-options:
+    name: Cosmic Evening Collector
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python Environment
+        run: uv sync
+
+      - name: Run Cosmic Option Chain Collector
+        run: |
+          uv run python fetch_option_chain.py \
+            --underlying "${{ inputs.underlying }}" \
+            --duration-minutes "${{ inputs.duration_minutes }}"
+
+      - name: Install Rclone
+        if: always()
+        run: |
+          sudo apt-get update && sudo apt-get install -y rclone
+
+      - name: Configure Rclone
+        if: always()
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "${{ secrets.RCLONE_CONFIG_B64 }}" | base64 -d > ~/.config/rclone/rclone.conf
+          chmod 600 ~/.config/rclone/rclone.conf
+
+      - name: Upload Parquet to Google Drive
+        if: always()
+        id: upload
+        run: |
+          if [ -d "./exports" ] && [ "$(ls -A ./exports/*.parquet 2>/dev/null)" ]; then
+            echo "Exported Parquet files found. Uploading to Google Drive..."
+            rclone copy ./exports gdrive:00_MASTER_WORKSPACE/02_DATA/Cosmic_Options/ --include "*.parquet" -v --stats-one-line
+          else
+            echo "No Parquet files found in ./exports to upload."
+          fi
+
+      - name: Verify Google Drive Upload (Integrity Check)
+        if: always()
+        id: drive_check
+        run: |
+          if [ -d "./exports" ] && [ "$(ls -A ./exports/*.parquet 2>/dev/null)" ]; then
+            if rclone check ./exports gdrive:00_MASTER_WORKSPACE/02_DATA/Cosmic_Options/ --one-way --size-only; then
+              echo "DRIVE_STATUS=Verified & Synced" >> $GITHUB_ENV
+            else
+              echo "DRIVE_STATUS=Discrepancy Detected" >> $GITHUB_ENV
+            fi
+          else
+            echo "DRIVE_STATUS=No Exports Generated" >> $GITHUB_ENV
+          fi
+
+      - name: Send Telegram Run Report
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          PARQUET_FILE=$(ls -t exports/*.parquet 2>/dev/null | head -n 1 || echo "")
+          uv run python scripts/notify_telegram.py \
+            --parquet-file "$PARQUET_FILE" \
+            --duration "${{ inputs.duration_minutes }} min" \
+            --drive-status "${{ env.DRIVE_STATUS || 'Upload Skipped / Incomplete' }}"
