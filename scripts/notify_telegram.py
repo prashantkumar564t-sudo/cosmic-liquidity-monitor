@@ -35,7 +35,7 @@ def get_file_info(file_path_str: str | None) -> tuple[int | None, str | None]:
         except Exception:
             pass
         out_sql = str(p.resolve()).replace("\\", "/")
-        res = con.query(f"SELECT COUNT(*) FROM read_parquet('{out_sql}')").fetchone()
+        res = con.execute(f"SELECT COUNT(*) FROM read_parquet('{out_sql}')").fetchone()
         if res:
             rows = int(res[0])
     except Exception:
