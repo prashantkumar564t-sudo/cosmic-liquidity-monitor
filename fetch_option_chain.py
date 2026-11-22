@@ -302,35 +302,74 @@ def parse_orderbook_liquidity(book: dict, contract_size: float = 0.001) -> dict:
     }
 
 
+def parse_expiry_dt(raw_ts) -> datetime | None:
+    """Robust parser for diverse expiry timestamps: ISO strings, epoch timestamps, or formatted dates."""
+    if raw_ts is None:
+        return None
+    if isinstance(raw_ts, (int, float)):
+        val = float(raw_ts)
+        if val > 1e11:  # Milliseconds
+            val /= 1000.0
+        return datetime.fromtimestamp(val, tz=timezone.utc)
+
+    ts_str = str(raw_ts).strip()
+    if not ts_str:
+        return None
+
+    try:
+        clean_ts = ts_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(clean_ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        pass
+
+    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d%b%y", "%d%b%Y"):
+        try:
+            dt = datetime.strptime(ts_str, fmt)
+            return dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+    return None
+
+
 def resolve_target_expiry(expiries: list, target_date_str: str | None) -> dict | None:
-    """Select requested target expiry, or auto-detect nearest active expiry."""
+    """Select requested target expiry, or auto-detect nearest active future expiry."""
     if not expiries:
         return None
 
-    if target_date_str and target_date_str.lower() != "auto":
+    if target_date_str and target_date_str.strip().lower() != "auto":
+        tgt = target_date_str.strip().upper()
+        # 1. Direct substring match against raw expiry timestamp
         for exp in expiries:
-            if target_date_str in exp.get("expiry_ts", ""):
+            ts_str = str(exp.get("expiry_ts", "")).upper()
+            if tgt in ts_str:
                 return exp
+        # 2. Date-based match via parse_expiry_dt
+        for exp in expiries:
+            dt = parse_expiry_dt(exp.get("expiry_ts"))
+            if dt:
+                if (
+                    tgt in dt.strftime("%Y-%m-%d")
+                    or tgt in dt.strftime("%d%b%y").upper()
+                    or tgt in dt.strftime("%d%b%Y").upper()
+                ):
+                    return exp
 
     now_utc = datetime.now(timezone.utc)
     future_expiries = []
     for exp in expiries:
-        ts_str = exp.get("expiry_ts", "")
-        try:
-            # Handle standard ISO strings e.g. '2026-11-21T12:00:00Z'
-            clean_ts = ts_str.replace("Z", "+00:00")
-            dt = datetime.fromisoformat(clean_ts)
-            if dt > now_utc:
-                future_expiries.append((dt, exp))
-        except Exception:
-            continue
+        dt = parse_expiry_dt(exp.get("expiry_ts"))
+        if dt and dt > now_utc:
+            future_expiries.append((dt, exp))
 
     if future_expiries:
         future_expiries.sort(key=lambda x: x[0])
         return future_expiries[0][1]
 
     # Fallback to first available expiry
-    return expiries[0]
+    return expiries[0] if expiries else None
 
 
 def run_collection_cycle(
@@ -345,45 +384,62 @@ def run_collection_cycle(
     t0 = time.perf_counter()
     now_utc = datetime.now(timezone.utc)
     now_iso = now_utc.isoformat()
+    norm_underlying = underlying.strip().upper()
 
     # 1. Fetch chain metadata
-    chain_url = f"https://cosmic.trade/api/v1/options/chain?underlying={underlying}"
+    chain_url = f"https://cosmic.trade/api/v1/options/chain?underlying={norm_underlying}"
     raw_chain = http_get_json(chain_url, timeout=5.0)
-    if not raw_chain or "expiries" not in raw_chain:
+    if not raw_chain or not isinstance(raw_chain, dict):
         return 0, "N/A", 0.0, "Failed to fetch option chain metadata"
 
-    expiries = raw_chain.get("expiries", [])
+    expiries = raw_chain.get("expiries")
+    if expiries is None or not isinstance(expiries, list):
+        return 0, "N/A", 0.0, "Invalid expiries format in API response"
+
+    if len(expiries) == 0:
+        return 0, "N/A", 0.0, f"No active option expiries listed on exchange for {norm_underlying}"
+
     matched_exp = resolve_target_expiry(expiries, target_expiry_str)
     if not matched_exp:
-        return 0, "N/A", 0.0, "No active expiry found"
+        return 0, "N/A", 0.0, "No matching active expiry found"
 
-    expiry_ts = matched_exp.get("expiry_ts", "")
+    expiry_ts = str(matched_exp.get("expiry_ts", ""))
     strikes_data = matched_exp.get("strikes", [])
+    if not strikes_data:
+        return 0, expiry_ts, 0.0, "No strike data in matched expiry"
 
     # 2. Prepare contracts metadata
     symbols_to_fetch = []
     contract_meta = {}
 
     for item in strikes_data:
-        strike_val = float(item["strike"])
+        try:
+            strike_val = float(item["strike"])
+        except (KeyError, ValueError, TypeError):
+            continue
         for side_key in ["call", "put"]:
             contract = item.get(side_key)
-            if not contract or not contract.get("symbol"):
+            if not contract or not isinstance(contract, dict):
                 continue
-            symbol = contract["symbol"]
+            symbol = contract.get("symbol")
+            if not symbol:
+                continue
             symbols_to_fetch.append(symbol)
-            contract_meta[symbol] = {
-                "strike": strike_val,
-                "side": side_key.upper(),
-                "symbol": symbol,
-                "mark": float(contract.get("mark", 0.0) or 0.0),
-                "iv": float(contract.get("iv", 0.0) or 0.0),
-                "delta": float(contract.get("delta", 0.0) or 0.0),
-                "gamma": float(contract.get("gamma", 0.0) or 0.0),
-                "vega": float(contract.get("vega", 0.0) or 0.0),
-                "theta": float(contract.get("theta", 0.0) or 0.0),
-                "contract_size": float(contract.get("contract_size", 0.001) or 0.001),
-            }
+            try:
+                contract_meta[symbol] = {
+                    "strike": strike_val,
+                    "side": side_key.upper(),
+                    "symbol": symbol,
+                    "mark": float(contract.get("mark", 0.0) or 0.0),
+                    "iv": float(contract.get("iv", 0.0) or 0.0),
+                    "delta": float(contract.get("delta", 0.0) or 0.0),
+                    "gamma": float(contract.get("gamma", 0.0) or 0.0),
+                    "vega": float(contract.get("vega", 0.0) or 0.0),
+                    "theta": float(contract.get("theta", 0.0) or 0.0),
+                    "contract_size": float(contract.get("contract_size", 0.001) or 0.001),
+                }
+            except (ValueError, TypeError):
+                continue
 
     # 3. Concurrent L2 orderbook fetch
     l2_books = {}
@@ -410,7 +466,7 @@ def run_collection_cycle(
         record = (
             now_utc,
             cycle_id,
-            underlying,
+            norm_underlying,
             expiry_ts,
             sym,
             meta["strike"],
@@ -440,7 +496,7 @@ def run_collection_cycle(
             csv_rows.append(
                 {
                     "timestamp": now_iso,
-                    "underlying": underlying,
+                    "underlying": norm_underlying,
                     "expiry": expiry_ts,
                     "strike": meta["strike"],
                     "side": meta["side"],
@@ -479,7 +535,7 @@ def run_collection_cycle(
         with open(DEFAULT_JSON_PATH, mode="w", encoding="utf-8") as f:
             json.dump(
                 {
-                    "underlying": underlying,
+                    "underlying": norm_underlying,
                     "expiry": expiry_ts,
                     "captured_at_utc": now_iso,
                     "contracts_count": len(l2_books),
